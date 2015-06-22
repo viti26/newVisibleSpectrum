@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent">
+
+    <com.etereot.visiblespectrum.MyView
+        android:layout_height="fill_parent"
+        android:layout_width="fill_parent"
+        android:id="@+id/mView" />
+
+    <RelativeLayout
+        android:layout_height="fill_parent"
+        android:layout_width="fill_parent">
+
+        <TextView
+            android:layout_height="wrap_content"
+            android:layout_width="wrap_content"
+            android:id="@+id/text"
+            android:textSize="24sp"
+            android:textColor="#88ffffff"
+            android:gravity="center_horizontal"
+            android:layout_centerInParent="true"
+            android:visibility="visible"
+            android:text="@string/mView_layout_text"/></RelativeLayout>
+
+
+
+
+
+</FrameLayout>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Visible Spectrum</string>
+
+    <string name="action_settings">Opciones</string>
+    <string name="mode_ready">To Preparao</string>
+    <string name="mode_pause">Wait, you idiot</string>
+    <string name="mView_layout_text">Ueee</string>
+    <string name="menu_start">Empezar</string>
+    <string name="menu_pause">Parar</string>
+    <string name="menu_resume">Resumir</string>
+
+
+
+</resources>
