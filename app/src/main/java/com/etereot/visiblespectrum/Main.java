@@ -1,22 +1,25 @@
 package com.etereot.visiblespectrum;
 
 import android.app.Activity;
+import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.TextView;
 
 
 public class Main extends Activity {
 
-    private MyView.MyThread mThread;
-    private MyView mView;
+
+    private GLSurfaceView mView;
 
     private static final int MENU_PAUSE = 1;
-
     private static final int MENU_RESUME = 2;
-
     private static final int MENU_START = 3;
 
     @Override
@@ -42,13 +45,13 @@ public class Main extends Activity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case MENU_START:
-                mThread.doStart();
+
                 return true;
             case MENU_PAUSE:
-                mThread.pause();
+
                 return true;
             case MENU_RESUME:
-                mThread.unpause();
+
                 return true;
 
         }
@@ -60,49 +63,20 @@ public class Main extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
-        setContentView(R.layout.mview_layout);
-
         super.onCreate(savedInstanceState);
-        mView = (MyView)findViewById(R.id.mView);
-        mThread = mView.getThread();
 
-        // give the View a handle to the TextView used for messages
-        mView.setTextView((TextView) findViewById(R.id.text));
+        mView = new MyView(this);
 
+        //This sets the game in fullscreen mode
+        requestWindowFeature(Window.FEATURE_NO_TITLE);
+        getWindow().setFlags(
+                WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-        if (savedInstanceState == null) {
-            // we were just launched: set up a new game
-            mThread.setState(mThread.STATE_READY);
-            Log.w(this.getClass().getName(), "SIS is null");
-        } else {
-            // we are being restored: resume a previous game
-            mThread.restoreState(savedInstanceState);
-            Log.w(this.getClass().getName(), "SIS is nonnull");
-        }
-
-
+        setContentView(mView);
 
     }
 
-
-
-
-
-    @Override
-    protected void onPause() {
-        mView.getThread().pause();
-        super.onPause();
-
-
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        // just have the View's thread save its state into our Bundle
-        super.onSaveInstanceState(outState);
-        mThread.saveState(outState);
-        Log.w(this.getClass().getName(), "SIS called");
-    }
 
 
 }

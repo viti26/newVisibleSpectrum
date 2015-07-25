@@ -1,22 +1,17 @@
 package com.etereot.visiblespectrum;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.BitmapShader;
-import android.graphics.Canvas;
-import android.graphics.ColorMatrix;
-import android.graphics.ColorMatrixColorFilter;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.PointF;
-import android.graphics.Shader;
+import android.opengl.GLES20;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.ShortBuffer;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
+import java.util.Arrays;
 
-import static java.lang.Math.PI;
-import static java.lang.Math.abs;
+
 
 /**
  * Created by Admin on 12/01/2015.
@@ -30,125 +25,140 @@ public class Luz extends Mates {
     //punto de inicio de cada lado de la luz
     private PointF iniz,inid;
 
-    //grado de giro de la luz
-    private double grado;
+    //angle de giro de la luz
+    private float angle;
 
     //mitad grosor de la luz principal
-    private final int tLuz=5;
+    private final float tLuz=0.01f;
 
-    private final int radio=30;
+    private final float radio=0.1f;
 
     //Rayo de luz principal
     private Rayo luz;
 
     private ArrayList<Rayo> luces;
 
-    public static Paint lPaint,hPaint,bPaint;
+    // Set color with red, green, blue and alpha (opacity) values
+    static float color[] = { 1.0f, 1.0f, 1.0f, 1.0f}; //White
 
-    public static Bitmap bmp;
+    //distancia segura de que no choca
+    final float segdist = 2*tLuz + 0.001f;
 
 
 
-    public Luz(Bitmap bmp){
+    //Used for the shader
+    private final int mProgram;
 
-        iniz = new PointF();
-        inid = new PointF();
+    //Used when drawing
+    private int mPositionHandle;
+    private int mColorHandle;
 
-        iniciog = new PointF();
+    //Coords_per_vertex is common to everything, should not be defined everywhere...
+    static final int COORDS_PER_VERTEX = 2;
+
+    private final int vertexStride = 8; //COORDS_PER_VERTEX * 4;  4 bytes per vertex
+
+    //Buffers objects stored here
+    final int[] vbo = new int[1];
+    final int[] ibo = new int[1];
+
+    private FloatBuffer vertexBuffer;
+    private ShortBuffer indexBuffer;
+    private int indice_size;
+
+
+
+
+    public Luz(){
+
+        inicio = new PointF(0,-1);
+        iniciog = new PointF(inicio.x,inicio.y-radio);
+
+        iniz = new PointF(iniciog.x-tLuz,iniciog.y);
+        inid = new PointF(iniciog.x + tLuz, iniciog.y);
 
         luz = new Rayo();
+        //Initializing geometry
+        luz.addPuntosdechoqueiz(iniz);
+        luz.addPuntosdechoquede(inid);
 
         luces = new ArrayList<Rayo>();
 
-        this.bmp = bmp;
+        setLuz();
+        update();
 
-        lPaint = new Paint();
-        lPaint.setARGB(255, 255, 255, 255);
-        lPaint.setStrokeWidth(1);
-        lPaint.setStyle(Paint.Style.FILL_AND_STROKE);
-        lPaint.setAntiAlias(true);
-        //lPaint.setShader(shader);
+        //To render vertices
+        int vertexShader = MyGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER,
+                vertexShaderCode);
+        //To render faces
+        int fragmentShader = MyGLRenderer.loadShader(GLES20.GL_FRAGMENT_SHADER,
+                fragmentShaderCode);
 
-        //pintura del halo
-        hPaint = new Paint();
-        hPaint.setARGB(50, 255, 255, 255);
-        hPaint.setStrokeWidth(1);
-        hPaint.setStyle(Paint.Style.FILL_AND_STROKE);
-        hPaint.setAntiAlias(true);
+        // create empty OpenGL ES Program
+        mProgram = GLES20.glCreateProgram();
 
-        bPaint = new Paint();
-        bPaint.setColorFilter(new ColorMatrixColorFilter(getColorMatrix()));
+        // add the vertex shader to program
+        GLES20.glAttachShader(mProgram, vertexShader);
 
+        // add the fragment shader to program
+        GLES20.glAttachShader(mProgram, fragmentShader);
 
-
+        // creates OpenGL ES program executables
+        GLES20.glLinkProgram(mProgram);
 
     }
 
-    public void setLuz(PointF origen){
-
-        inicio = origen;
+    public void setLuz(){
 
         //angulo inicial
-        grado=90;
+        angle =90;
 
         iniciog.set(inicio.x,inicio.y-radio);
 
         iniz.set(iniciog.x-tLuz,iniciog.y);
         inid.set(iniciog.x + tLuz, iniciog.y);
 
-        //Inicio de la geometria de la luz
+        //Initializing geometry
         luz.addPuntosdechoqueiz(iniz);
         luz.addPuntosdechoquede(inid);
 
 
-        //dando una direccion inicial
-        luz.setIzRecta(iniz, new PointF(0, -50));
-        luz.setDeRecta(inid, new PointF(0, -50));
-
+        //Initial direction
+        luz.setIzRecta(iniz, new PointF(0, 0.5f));
+        luz.setDeRecta(inid, new PointF(0, 0.5f));
+        //I think this is no longer needed, revise later
         luz.setTluz();
 
 
     }
 
-    public void updateLuz(){
+    public void update(){
         //reiniciar array de luces
         luces.clear();
+        //Same as above
         luz.setTluz();
-        luz.setSalta(false);
-        updateRayo(null, luz);
+        updateRay(null, luz);
+
+        createBuffers();
+        bindBuffers();
 
     }
 
 
     //dada una lista de objetos y un rayo, calcula su geometria
     //con colisiones y demas
-    private void updateRayo(Triangle objeto,Rayo rayo){
+    private void updateRay(Triangle objeto,Rayo rayo){
 
         Triangle choque;
 
-        //Reiniciar puntosdechoquede/iz
+        //Clear the arrays
         rayo.clearchoque();
-
-        float tLuz = rayo.getTluz();
-
-        //Caso segun arriba-derecha, abajo-derecha, abajo-izquierda y arriva-izquierda
-        int caso;
-
-        //distancia segura de que no choca
-        float segdist = 2*tLuz + 60;
 
         if(luces.size()>10) return;
 
 
         ArrayList<Estruct> lista = new ArrayList<Estruct>();
 
-        PointF vector = rayo.getDeRecta().v;
-
-        if(vector.y<0){
-            if (vector.x>0) caso=1;
-            else caso=4;
-        }
-        else if(vector.x>0){caso=2;} else caso=3;
 
 
         //basicamente ir pasando por to los objetos para mirar si chocan
@@ -159,7 +169,7 @@ public class Luz extends Mates {
         if(!MyView.Objetos.isEmpty()){
 
             //crea una lista con las distancias al origen de la luz de cada objeto
-            for(int i=0;i<MyView.Objetos.size();i++){ lista.add(new Estruct(MyView.Objetos.get(i),distancia(rayo.getIzRecta().getP1(), MyView.Objetos.get(i).getCentro()))); }
+            for(int i=0;i<MyView.Objetos.size();i++){ lista.add(new Estruct(MyView.Objetos.get(i),distancia(rayo.getIzRecta().getP1(), MyView.Objetos.get(i).getCenter()))); }
 
             Collections.sort(lista);
 
@@ -169,18 +179,19 @@ public class Luz extends Mates {
 
                 if(choque==objeto) continue;
 
-                //Para no realizar calculos si el objeto esta detras del rayo
-                if( (caso==1 || caso == 4) && (choque.getCentro().y>rayo.getIzRecta().getP1().y + segdist)  ) continue;
-                if( (caso==2 || caso == 3) && (choque.getCentro().y<rayo.getIzRecta().getP1().y - segdist)  ) continue;
-                if( (caso==3 || caso == 4) && (choque.getCentro().x>rayo.getIzRecta().getP1().x + segdist)  ) continue;
-                if( (caso==1 || caso == 2) && (choque.getCentro().x<rayo.getIzRecta().getP1().x - segdist)  ) continue;
+
+                if(angle>180){
+                    if(choque.getCenter().y>rayo.getIzRecta().getP1().y + segdist) continue;
+                    if (angle>270) if(choque.getCenter().x<rayo.getIzRecta().getP1().x - segdist) continue;
+                    else if(choque.getCenter().x>rayo.getIzRecta().getP1().x + segdist) continue;
+                }
+                else {
+                    if(choque.getCenter().y<rayo.getIzRecta().getP1().y - segdist) continue;
+                    if(angle<90){if(choque.getCenter().x<rayo.getIzRecta().getP1().x - segdist) continue;}
+                    else if(choque.getCenter().x>rayo.getIzRecta().getP1().x + segdist) continue;
+                }
 
 
-                //seria mejor calcular si choca uno mirar
-                //el otro que es probable que tambien
-                //true iz--false de
-                //lo ago pero solo amedia creo que podria
-                //hacerse mas
                 if(!calcula(choque,rayo,true))break afuera;
                 if(!calcula(choque,rayo,false)) break afuera;
 
@@ -193,19 +204,28 @@ public class Luz extends Mates {
             rayo.addPuntosdechoqueiz(a);
             rayo.addPuntosdechoquede(b);
 
-
-            //se rompe como mueva el inicio de la luz principal
-            if(a.x==0 && b.y==0) {
-                rayo.addPuntosdechoqueiz(new PointF(0, 0));
-            } else if (a.y==0 && b.x==inicio.x*2){
-                rayo.addPuntosdechoquede(new PointF(inicio.x * 2, 0));
+            /*Top-left corner
+            Top-right corner
+            Down-left corner
+            Down-right corner
+            Maybe all this code should be
+            inside some function with "choquebordes"
+             */
+            if(a.x==-1 && b.y==1) {
+                rayo.addPuntosdechoqueiz(new PointF(-1,1));
+            } else if (a.y==1 && b.x==1){
+                rayo.addPuntosdechoquede(new PointF(1,1));
+            } else if (a.y==-1 && b.x==-1){
+                rayo.addPuntosdechoqueiz(new PointF(-1,-1));
+            } else if (a.x==1 && b.y==-1){
+                rayo.addPuntosdechoqueiz(new PointF(1,-1));
             }
 
         }
 
-        rayo.setPath();
-        rayo.setHalopath();
-        rayo.setBmp(bmp);
+        rayo.setCoords();
+
+
 
     }
 
@@ -217,14 +237,12 @@ public class Luz extends Mates {
 
         ArrayList<Recta> Lados = objeto.getLados();
         ArrayList<PointF> puntosdechoque;
-
         PointF uno,dos;
         Recta linea,lineao;
 
         boolean reflec = objeto.getReflec();
 
         Rayo a;
-
         int numero;
 
         PointF vertice; //vertice de un lado
@@ -232,7 +250,6 @@ public class Luz extends Mates {
         double distancia,odistancia;
 
         float tLuz = rayo.getTluz();
-
 
 
         //seleccion del lado del rayo a calcular
@@ -252,11 +269,12 @@ public class Luz extends Mates {
         //Calculo de si choca o no y si lo ace
         //calcula donde y lo mete en "uno"
         //numero es el lado donde a chocado
-        uno=linea.ChoqueRectas(Lados.get(0));
+        uno=linesCollision(linea, Lados.get(0), true);
+
         numero=0;
 
         for(int i=1;i<3;i++){
-            dos=linea.ChoqueRectas(Lados.get(i));
+            dos=linesCollision(linea, Lados.get(i), true);
 
             if(uno==null) {uno=dos;numero=i; continue;}
             if(dos==null) continue;
@@ -285,7 +303,7 @@ public class Luz extends Mates {
             if(reflec) {
                 if (lado) a = new Rayo(vertice,uno,reflect(linea.v,Lados.get(numero).n));
                 else a = new Rayo(uno,vertice,reflect(linea.v,Lados.get(numero).n));
-                updateRayo(objeto,a);
+                updateRay(objeto, a);
                 luces.add(a);
             }
 
@@ -309,7 +327,7 @@ public class Luz extends Mates {
 
                     if (lado) a = new Rayo(vertice,uno,reflect(linea.v,Lados.get(numero).n));
                     else a = new Rayo(uno,vertice,reflect(linea.v,Lados.get(numero).n));
-                    updateRayo(objeto,a);
+                    updateRay(objeto, a);
                     luces.add(a);
                 }
 
@@ -317,13 +335,13 @@ public class Luz extends Mates {
             }
             else {
                 //es seguro que el otro lado choque,y se calcula siempre iz primero
-                PointF b=rayo.getDeRecta().ChoqueRectas(Lados.get(numero));
+                PointF b=linesCollision(rayo.getDeRecta(),Lados.get(numero),true);
                 rayo.addPuntosdechoquede(b);
 
                 //si el objeto refleja, comenzar a crear el nuevo rayo
                 if(reflec) {
                     a = new Rayo(b,uno,reflect(linea.v,Lados.get(numero).n));
-                    updateRayo(objeto,a);
+                    updateRay(objeto, a);
                     luces.add(a);
                 }
                 return false;
@@ -359,7 +377,7 @@ public class Luz extends Mates {
                 if(reflec) {
                     if (lado) a = new Rayo(vertice,puntosdechoque.get(puntosdechoque.size()-2),reflect(linea.v,Lados.get(numero).n));
                     else a = new Rayo(puntosdechoque.get(puntosdechoque.size()-2),vertice,reflect(linea.v,Lados.get(numero).n));
-                    updateRayo(objeto,a);
+                    updateRay(objeto, a);
                     luces.add(a);
                 }
 
@@ -380,7 +398,7 @@ public class Luz extends Mates {
             if (numero==0) numero = 2;
             else numero--;
 
-            PointF b=rayo.getDeRecta().ChoqueRectas(Lados.get(numero));
+            PointF b=linesCollision(rayo.getDeRecta(), Lados.get(numero), true);
             rayo.addPuntosdechoquede(b);
 
             //si el objeto refleja, comenzar a crear el nuevo rayo con el punto
@@ -388,11 +406,10 @@ public class Luz extends Mates {
             if(reflec) {
                 a = new Rayo(b,puntosdechoque.get(puntosdechoque.size()-1),reflect(linea.v,Lados.get(numero).n));
 
-                updateRayo(objeto,a);
+                updateRay(objeto, a);
                 luces.add(a);
             }
 
-            rayo.setSalta(true);
             return false;
 
         }
@@ -401,36 +418,94 @@ public class Luz extends Mates {
         //else linea.setOrigen(puntosdechoque.get(puntosdechoque.size() - 1));
         PointF normalp = Mates.normalice(new PointF(rayo.getIzRecta().v.y, -rayo.getIzRecta().v.x));
         PointF j = puntosdechoque.get(puntosdechoque.size()-1);
-        Recta normal = new Recta(j, new PointF(j.x+normalp.x,j.y+normalp.y));
+        Recta normal = new Recta(j.x,j.y,j.x+normalp.x,j.y+normalp.y);
 
         if(lado){
-            rayo.addPuntosdechoquede(rayo.getDeRecta().ChoqueRectas(normal,true));
+            rayo.addPuntosdechoquede(linesCollision(rayo.getDeRecta(), normal, false));
         } else {
-            rayo.addPuntosdechoqueiz(rayo.getIzRecta().ChoqueRectas(normal,true));
+            rayo.addPuntosdechoqueiz(linesCollision(rayo.getIzRecta(), normal, false));
         }
 
         a = new Rayo(rayo.getPuntosdechoqueiz().get(rayo.getPuntosdechoqueiz().size()-1),rayo.getPuntosdechoquede().get(rayo.getPuntosdechoquede().size()-1),rayo.getIzRecta().v);
-        updateRayo(objeto, a);
+        updateRay(objeto, a);
         luces.add(a);
 
         return false;
     }
 
+    private void createBuffers(){
 
-    //dibuja las luces con su halo
-    public void drawLuz(Canvas canvas){
-        luz.drawRayo(canvas);
-        for(int i=0;i<luces.size();i++){luces.get(i).drawRayo(canvas);}
+        float[] rayCoords = luz.getRayCoords();
+        for(int i=0;i<luces.size();i++){rayCoords = Mates.concatenate(rayCoords, luces.get(i).getRayCoords());}
+
+        short[] drawOrder = luz.getdrawOrder();
+        for(int i=0;i<luces.size();i++){drawOrder = Mates.concatenate(drawOrder, luces.get(i).getdrawOrder());}
+        indice_size = drawOrder.length;
+
+        // initialize vertex byte buffer for shape coordinates
+        ByteBuffer bb = ByteBuffer.allocateDirect(
+                // (# of coordinate values * 4 bytes per float)
+                rayCoords.length * 4);
+        bb.order(ByteOrder.nativeOrder());
+        vertexBuffer = bb.asFloatBuffer();
+        vertexBuffer.put(rayCoords);
+        vertexBuffer.position(0);
+
+        // initialize byte buffer for the draw list
+        ByteBuffer dlb = ByteBuffer.allocateDirect(
+                // (# of coordinate values * 2 bytes per short)
+                drawOrder.length * 2);
+        dlb.order(ByteOrder.nativeOrder());
+        indexBuffer = dlb.asShortBuffer();
+        indexBuffer.put(drawOrder);
+        indexBuffer.position(0);
+
     }
 
 
-    //siempre se aplica al rayo principal
-    public void setDirection(double cambio){
+    //Draw the light
+    public void draw(){
+
+        // Add program to OpenGL ES environment
+        GLES20.glUseProgram(mProgram);
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
+
+        // get handle to vertex shader's vPosition member
+        mPositionHandle = GLES20.glGetAttribLocation(mProgram, "vPosition");
+        // Enable a handle to the triangle vertices
+        GLES20.glEnableVertexAttribArray(mPositionHandle);
+
+        // get handle to fragment shader's vColor member
+        mColorHandle = GLES20.glGetUniformLocation(mProgram, "vColor");
+        // Set color for drawing the triangle
+        GLES20.glUniform4fv(mColorHandle, 1, Luz.color, 0);
+
+        // Prepare the object coordinate data
+        GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX,
+                GLES20.GL_FLOAT, false,
+                vertexStride, 0);
+
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES,indice_size,GLES20.GL_UNSIGNED_SHORT,0);
+
+        // Disable vertex array
+        GLES20.glDisableVertexAttribArray(mPositionHandle);
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
 
 
-        grado= grado + cambio;
+    }
 
-        iniciog.set((float)(inicio.x+radio*Math.cos(Math.toRadians(grado))),(float)(inicio.y-radio*Math.sin(Math.toRadians(grado))));
+
+    //Always for the main ray
+    public void setDirection(float angle){
+
+        this.angle= angle % 360;
+
+
+        iniciog.set((float)(inicio.x+radio*Math.cos(Math.toRadians(angle))),(float)(inicio.y-radio*Math.sin(Math.toRadians(angle))));
 
         //vector
         PointF vector = new PointF(iniciog.x-inicio.x,iniciog.y-inicio.y);
@@ -449,17 +524,42 @@ public class Luz extends Mates {
         luz.getDeRecta().setGrado(inid,vector);
     }
 
-    private ColorMatrix getColorMatrix(){
-        //Disminuye la trasparencia
-        ColorMatrix colorMatrix = new ColorMatrix(new float[]{
-                1, 0, 0, 0,0,
-                0, 1, 0, 0,0,
-                0, 0, 1, 0,0,
-                0, 0, 0, 1,-50,
-        });
+    public float getAngle(){return angle;}
 
-        return colorMatrix;
+    public void bindBuffers(){
+
+        GLES20.glGenBuffers(1, vbo, 0);
+        GLES20.glGenBuffers(1, ibo, 0);
+
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo[0]);
+        GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, vertexBuffer.capacity()
+                * 4, vertexBuffer, GLES20.GL_STATIC_DRAW);
+
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, ibo[0]);
+        GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.capacity()
+                * 2, indexBuffer, GLES20.GL_STATIC_DRAW);
+
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
+
     }
+
+
+    private final String vertexShaderCode =
+            "attribute vec4 vPosition;" +
+                    "void main() {" +
+                    "  gl_Position = vPosition;" +
+                    "}";
+
+    private final String fragmentShaderCode =
+            "precision mediump float;" +
+                    "uniform vec4 vColor;" +
+                    "void main() {" +
+                    "  gl_FragColor = vColor;" +
+                    "}";
+
+
 
 
 

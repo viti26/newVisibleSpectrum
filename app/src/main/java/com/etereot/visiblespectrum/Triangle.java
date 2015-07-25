@@ -5,7 +5,11 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PointF;
+import android.opengl.GLES20;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 
 /**
@@ -14,134 +18,181 @@ import java.util.ArrayList;
 public class Triangle {
 
     //El pading a cada lado en bmp es 8 izquierda y derecha y 18 arriba y abajo en imagen de 144-144
+    //x,y is the center of the bitmap
+    private float x,y,triangleCoords[];
 
-    private float x,y;
-
-    private final Path path;
-
-    private PointF v1,v2,v3,centro;
-
-    private Recta Lado1,Lado2,Lado3;
+    private FloatBuffer vertexBuffer;
 
     private ArrayList Lados;
 
+    private PointF center;
     private boolean reflec;
 
-    private Bitmap bmp;
+    private float peq;
 
-    private float radio,peq;
+    static final int COORDS_PER_VERTEX = 2;
 
-    private final float cos30= 0.86025403f;
-    private final float tg30= 0.577350269f;
+    // Set color with red, green, blue and alpha (opacity) values
+    float color[] = { 0.63671875f, 0.76953125f, 0.22265625f, 1.0f };
+
+    //Used for the shader
+    private final int mProgram;
+
+    //Used when drawing
+    private int mPositionHandle;
+    private int mColorHandle;
+
+    private final int vertexCount = 3;
+    private final int vertexStride = 8; //COORDS_PER_VERTEX * 4;  4 bytes per vertex
 
 
-    //Todos equilateros, acer un metodo para allar coordenadas a partir de un centro
 
 
-    //inicializar vertices, la geometria(path) y el array de lados
-    public Triangle(Bitmap bmp){
+    public Triangle(PointF center,boolean reflec){
 
-        path = new Path();
-        v1 = new PointF();
-        v2 = new PointF();
-        v3 = new PointF();
-        centro = new PointF();
+        this.reflec = reflec;
+        //this.bmp = bmp;
+        this.center = center;
 
-        Lados = new ArrayList(3);
+        computePoints(center, /*bmp.getWidth() * 0.8888f fix it later */ 0.2f);
 
-        Lado1 = new Recta();
-        Lado2 = new Recta();
-        Lado3 = new Recta();
+        Lados = new ArrayList();
+        //In counterclockwise order v1,v2; v3,v2; v3,v1
+        Lados.add(new Recta(triangleCoords[0],triangleCoords[1],triangleCoords[2],triangleCoords[3]));
+        Lados.add(new Recta(triangleCoords[4],triangleCoords[5],triangleCoords[2], triangleCoords[3]));
+        Lados.add(new Recta(triangleCoords[4], triangleCoords[5],triangleCoords[0],triangleCoords[1]));
 
-        this.bmp = bmp;
+
+        //x=center.x - bmp.getWidth()/ 2;
+        //y=center.y + peq + bmp.getHeight()*0.125f;
+
+
+        // initialize vertex byte buffer for shape coordinates
+        ByteBuffer bb = ByteBuffer.allocateDirect(
+                // (number of coordinate values * 4 bytes per float)
+                triangleCoords.length * 4);
+        // use the device hardware's native byte order
+        bb.order(ByteOrder.nativeOrder());
+
+        // create a floating point buffer from the ByteBuffer
+        vertexBuffer = bb.asFloatBuffer();
+        // add the coordinates to the FloatBuffer
+        vertexBuffer.put(triangleCoords);
+        // set the buffer to read the first coordinate
+        vertexBuffer.position(0);
+
+
+        //To render vertices
+        int vertexShader = MyGLRenderer.loadShader(GLES20.GL_VERTEX_SHADER,
+                vertexShaderCode);
+        //To render faces
+        int fragmentShader = MyGLRenderer.loadShader(GLES20.GL_FRAGMENT_SHADER,
+                fragmentShaderCode);
+
+        // create empty OpenGL ES Program
+        mProgram = GLES20.glCreateProgram();
+
+        // add the vertex shader to program
+        GLES20.glAttachShader(mProgram, vertexShader);
+
+        // add the fragment shader to program
+        GLES20.glAttachShader(mProgram, fragmentShader);
+
+        // creates OpenGL ES program executables
+        GLES20.glLinkProgram(mProgram);
 
     }
 
-    //dar valor a vertices, lados y la geometria
-    public void setTriangle(PointF centro,boolean r){
-
-        float lado=bmp.getWidth()*0.8888f;
-
-        calculatePoints(centro,lado);
-
-        this.centro=centro;
-
-
-        reflec=r;
-
-        Lado1.setRecta(v1,v2);
-        Lado2.setRecta(v3,v2);
-        Lado3.setRecta(v3,v1);
-
-        Lados.add(Lado1);
-        Lados.add(Lado2);
-        Lados.add(Lado3);
-
-
-        path.moveTo(v1.x, v1.y);
-        path.lineTo(v2.x, v2.y);
-        path.lineTo(v3.x, v3.y);
-
-        path.close();
-
-        x=centro.x - bmp.getWidth()/ 2;
-        y=centro.y - peq - bmp.getHeight()*0.125f;
-
-
-    }
 
 
     //para el on draw
-    public void drawTriangle(Canvas canvas,Paint paint) {
+    public void draw() {
 
-        canvas.drawPath(path,paint);
-        canvas.drawBitmap(bmp, x,y, null);
+        // Add program to OpenGL ES environment
+        GLES20.glUseProgram(mProgram);
+
+        // get handle to vertex shader's vPosition member
+        mPositionHandle = GLES20.glGetAttribLocation(mProgram, "vPosition");
+        // Enable a handle to the triangle vertices
+        GLES20.glEnableVertexAttribArray(mPositionHandle);
+
+        // Prepare the triangle coordinate data, defining the attribute
+        GLES20.glVertexAttribPointer(mPositionHandle, COORDS_PER_VERTEX,
+                GLES20.GL_FLOAT, false,
+                vertexStride, vertexBuffer);
+
+        // get handle to fragment shader's vColor member
+        mColorHandle = GLES20.glGetUniformLocation(mProgram, "vColor");
+
+        // Set color for drawing the triangle
+        GLES20.glUniform4fv(mColorHandle, 1, color, 0);
+
+        // Draw the triangle
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount);
+
+        // Disable vertex array
+        GLES20.glDisableVertexAttribArray(mPositionHandle);
     }
 
 
+
     //Devuelve un vertice, segun el int que pases
+    //This is horrible, fix it later
     public PointF getCoordenadas(int i){
-        if (i==0) return v1;
-        else if (i==1) return v2;
-        else if (i==2) return v3;
+        if (i==0) return new PointF(triangleCoords[0],triangleCoords[1]);
+        else if (i==1) return new PointF(triangleCoords[2],triangleCoords[3]);
+        else if (i==2) return new PointF(triangleCoords[4],triangleCoords[5]);
         else return null;
 
     }
 
     //Devuelve su numero en la lista, para ver su orden respectivo
+    //Same as above
     public int getNumero(PointF punto) {
-        if (punto == v1) return 0;
-        else if (punto == v2) return 1;
-        else if (punto == v3) return 2;
+        if (punto == new PointF(triangleCoords[0],triangleCoords[1])) return 0;
+        else if (punto == new PointF(triangleCoords[0],triangleCoords[1])) return 1;
+        else if (punto == new PointF(triangleCoords[0],triangleCoords[1])) return 2;
         else return -1;
     }
 
 
     //devuelve el array que contiene los lados
-    public ArrayList getLados(){
-
-        return Lados;
-
-    }
+    public ArrayList getLados(){return Lados;}
 
     public boolean getReflec(){return reflec;}
 
-    public PointF getCentro(){return centro;}
+    public PointF getCenter(){return center;}
 
-    private void calculatePoints(PointF centre,float lado){
+    private void computePoints(PointF centre,float lado){
 
-        float milado = lado/2;
-        float peq = tg30 * milado;
-        float gran = milado/cos30;
+        float mySide = lado/2;
+        float peq = 0.57735f * mySide;
+        float gran = mySide/0.86025f;
 
-        this.radio = gran;
         this.peq = peq;
 
-        v1.set(centre.x-milado,centre.y-peq);
-        v2.set(centre.x,centre.y+gran);
-        v3.set(centre.x+milado,centre.y-peq);
+        triangleCoords = new float[]{
+                centre.x - mySide, centre.y + peq,
+                centre.x, centre.y - gran,
+                centre.x + mySide, centre.y + peq
+        };
 
     }
+
+    /*The shader,i have to investigate how they work*/
+    private final String vertexShaderCode =
+            "attribute vec4 vPosition;" +
+                    "void main() {" +
+                    "  gl_Position = vPosition;" +
+                    "}";
+
+    private final String fragmentShaderCode =
+            "precision mediump float;" +
+                    "uniform vec4 vColor;" +
+                    "void main() {" +
+                    "  gl_FragColor = vColor;" +
+                    "}";
+
 
 
 

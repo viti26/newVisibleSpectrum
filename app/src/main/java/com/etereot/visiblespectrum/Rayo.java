@@ -1,15 +1,12 @@
 package com.etereot.visiblespectrum;
 
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.LinearGradient;
-import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.PointF;
-import android.graphics.RectF;
-import android.graphics.Shader;
+import android.opengl.GLES20;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.ShortBuffer;
 import java.util.ArrayList;
 
 /**
@@ -20,12 +17,6 @@ import java.util.ArrayList;
  */
 public class Rayo {
 
-    //Geometria del rayo
-    private Path path;
-
-    //Geometria de su halo
-    private Path halopath;
-
     private Recta izRecta;
     private Recta deRecta;
 
@@ -35,17 +26,10 @@ public class Rayo {
     //mitad grosor luz
     private float tluz;
 
-    //Factor de escalado
-    private final float scalar = 5f;
-    private final float scalad = 20f;
+    private float rayCoords[];
+    private short drawOrder[];
 
-    //La mierda iluminacion que estoy aciendo
-    private Bitmap bmp;
-
-    //Para calcular holopath, fumada y lo se
-    private boolean salta=false;
-
-    Rayo(){
+    Rayo() {
 
         puntosdechoquede = new ArrayList<PointF>(10);
         puntosdechoqueiz = new ArrayList<PointF>(10);
@@ -53,15 +37,9 @@ public class Rayo {
         izRecta = new Recta();
         deRecta = new Recta();
 
-        path = new Path();
-        halopath = new Path();
-
-        this.bmp = Luz.bmp;
-
-
     }
 
-    Rayo(PointF iniz,PointF inid,PointF vertex){
+    Rayo(PointF iniz, PointF inid, PointF vertex) {
 
         puntosdechoquede = new ArrayList<PointF>(10);
         puntosdechoqueiz = new ArrayList<PointF>(10);
@@ -72,13 +50,8 @@ public class Rayo {
         izRecta = new Recta();
         deRecta = new Recta();
 
-        izRecta.setGrado(iniz,vertex);
-        deRecta.setGrado(inid,vertex);
-
-        path = new Path();
-        halopath = new Path();
-
-        this.bmp = Luz.bmp;
+        izRecta.setGrado(iniz, vertex);
+        deRecta.setGrado(inid, vertex);
 
         setTluz();
 
@@ -86,153 +59,100 @@ public class Rayo {
     }
 
 
-
-
-    public void addPuntosdechoqueiz(PointF p){puntosdechoqueiz.add(p);}
-    public void addPuntosdechoquede(PointF p){puntosdechoquede.add(p);}
-
-    public void setIzRecta(PointF p,PointF v){izRecta.setGrado(p, v);}
-    public void setDeRecta(PointF p,PointF v){deRecta.setGrado(p,v);}
-
-    public void setTluz(){ tluz = (float)Mates.distancia(deRecta.getP1(),izRecta)/2;}
-
-    public void setSalta(boolean salta){this.salta=salta;}
-
-    public PointF izChoqueBordes(){return izRecta.ChoqueBordes();}
-    public PointF deChoqueBordes(){return deRecta.ChoqueBordes();}
-
-    public Recta getIzRecta(){return izRecta;}
-    public Recta getDeRecta(){return deRecta;}
-
-    public Path getPath(){return path;}
-    public Path getHalopath(){return halopath;}
-
-    public float getTluz(){return tluz;}
-
-    public ArrayList<PointF> getPuntosdechoqueiz(){return puntosdechoqueiz;}
-    public ArrayList<PointF> getPuntosdechoquede(){return puntosdechoquede;}
-
-
-    //Calcula el path a traves de los arrays
-    public void setPath(){
-
-        PointF geo;
-        path.reset();
-
-        path.moveTo(puntosdechoqueiz.get(0).x, puntosdechoqueiz.get(0).y);
-
-        for (int j=1;j<puntosdechoqueiz.size();j++){
-            geo=puntosdechoqueiz.get(j);
-            path.lineTo(geo.x,geo.y);
-        }
-
-        for(int j=puntosdechoquede.size()-1;j>=0;j--){
-            geo=puntosdechoquede.get(j);
-            path.lineTo(geo.x,geo.y);
-        }
-
-        path.close();
-
+    public void addPuntosdechoqueiz(PointF p) {
+        puntosdechoqueiz.add(p);
     }
 
+    public void addPuntosdechoquede(PointF p) {
+        puntosdechoquede.add(p);
+    }
+
+    public void setIzRecta(PointF p, PointF v) {
+        izRecta.setGrado(p, v);
+    }
+
+    public void setDeRecta(PointF p, PointF v) {
+        deRecta.setGrado(p, v);
+    }
+
+    public void setTluz() {
+        tluz = (float) Mates.distancia(deRecta.getP1(), izRecta) / 2;
+    }
+
+    public PointF izChoqueBordes() {
+        return izRecta.ChoqueBordes();
+    }
+
+    public PointF deChoqueBordes() {
+        return deRecta.ChoqueBordes();
+    }
+
+    public Recta getIzRecta() {
+        return izRecta;
+    }
+
+    public Recta getDeRecta() {
+        return deRecta;
+    }
+
+    public float getTluz() {
+        return tluz;
+    }
+
+    public ArrayList<PointF> getPuntosdechoqueiz() {
+        return puntosdechoqueiz;
+    }
+
+    public ArrayList<PointF> getPuntosdechoquede() {
+        return puntosdechoquede;
+    }
+
+    //Cool for every ray except for the first one, it is nor deleted so
+    //creating new buffers every time is not efficient or maybe it is
+    //because before you do not knot their size
+    public void setCoords(){
+
+        int size_iz = puntosdechoqueiz.size();
+        int size_de = puntosdechoquede.size();
+        int sum_size = size_de + size_iz;
+
+        rayCoords= new float[sum_size*2];
+
+        //this sets the coordinates of the ray
+        for(int i=0;i<size_de;i++){
+            rayCoords[i*2]=puntosdechoquede.get(i).x;
+            rayCoords[(i*2)+1]=puntosdechoquede.get(i).y;
+        }
+        for(int j=0;j<size_iz;j++){
+            rayCoords[(j+size_de)*2]=puntosdechoqueiz.get(size_iz-j-1).x;
+            rayCoords[(j+size_de)*2+1]=puntosdechoqueiz.get(size_iz-j-1).y;
+        }
+
+        //this sets the drawing order, its easier this way
+        if(sum_size==4) drawOrder = new short[]{0,1,2,0,2,3};
+        else if(sum_size==5) drawOrder = new short[]{0,1,2,0,2,4,2,3,4};
+        else if(size_de==2) drawOrder = new short[]{0,1,3,1,2,3,0,3,5,3,4,5};
+        else drawOrder = new short[]{0,1,2,2,3,4,0,2,5,2,4,5};
+    }
+
+
+
     //vacia puntos de la geometria y pon denuevo el inicio
-    public void clearchoque(){
+    public void clearchoque() {
 
         puntosdechoqueiz.clear();
         puntosdechoquede.clear();
-
         puntosdechoqueiz.add(izRecta.getP1());
         puntosdechoquede.add(deRecta.getP1());
 
-
-    }
-
-    public void setHalopath(){
-
-        halopath.reset();
-
-        PointF vector = Mates.normalice(izRecta.v);
-        PointF normal,izvector,devector;
-
-        //Asi normal siempre es acia la izquierda
-        normal = Mates.normalice(new PointF(vector.y,-vector.x));
-
-        izvector = new PointF(vector.x*scalar+normal.x*scalad,vector.y*scalar+normal.y*scalad);
-        devector = new PointF(vector.x*scalar-normal.x*scalad,vector.y*scalar-normal.y*scalad);
-
-        halopath.moveTo(puntosdechoqueiz.get(0).x-vector.x*scalar+normal.x*scalad,puntosdechoqueiz.get(0).y-vector.y*scalar+normal.y*scalad);
-
-        for(int i=1;i<puntosdechoqueiz.size();i++){
-            if(i==puntosdechoqueiz.size()-1 && salta) halopath.lineTo(puntosdechoqueiz.get(i).x+vector.x,puntosdechoqueiz.get(i).y+vector.y);
-            halopath.lineTo(puntosdechoqueiz.get(i).x+izvector.x,puntosdechoqueiz.get(i).y+izvector.y);
-        }
-
-        for(int i=puntosdechoquede.size()-1;i>0;i--){
-            halopath.lineTo(puntosdechoquede.get(i).x+devector.x,puntosdechoquede.get(i).y+devector.y);
-        }
-
-        halopath.lineTo(puntosdechoquede.get(0).x - vector.x * scalar - normal.x * scalad, puntosdechoquede.get(0).y - vector.y * scalar - normal.y * scalad);
-
-        halopath.close();
-
-
-
-    }
-
-    public void setBmp(Bitmap bmp) {
-
-        int width = bmp.getWidth();
-        int height = bmp.getHeight();
-        Matrix matrix = new Matrix();
-
-        scaleBmp(width,height,matrix);
-        rotateBmp(matrix);
-        this.bmp = Bitmap.createBitmap(bmp,0,0,width,height,matrix,false);
-    }
-
-    public void rotateBmp(Matrix matrix){ matrix.setRotate((float)Math.toDegrees(Mates.grado(izRecta.v))+ 90); }
-
-    public void scaleBmp(int width,int height,Matrix matrix){
-
-        PointF ini,fin;
-
-        ini = Mates.mid(izRecta.getP1(), deRecta.getP1());
-        if(salta){
-            Recta recta = new Recta(puntosdechoqueiz.get(puntosdechoqueiz.size() - 2), puntosdechoquede.get(puntosdechoquede.size() - 1));
-            fin = recta.ChoqueRectas(new Recta(ini,new PointF(ini.x+izRecta.v.x,ini.y+izRecta.v.y)),true);
-        } else fin = puntosdechoqueiz.get(puntosdechoqueiz.size()-1);
-
-        float scaley = (float)Mates.distancia(ini,fin)/height;
-        float scalex = tluz*scalad/width;
-
-        matrix.setScale(scalex,scaley);
-
     }
 
 
+    public short[] getdrawOrder(){return drawOrder;}
+    public float[] getRayCoords(){return rayCoords;}
 
-    public void setPaint(){
-
-        //Pa calcular el punto inicio y final del gradient, lo de salta es por si ay un vertice
-        PointF ini = Mates.mid(izRecta.getP1(),deRecta.getP1());
-        Recta recta = salta ? new Recta(puntosdechoqueiz.get(puntosdechoqueiz.size() - 1), puntosdechoquede.get(puntosdechoquede.size() - 1)) : new Recta(puntosdechoqueiz.get(puntosdechoqueiz.size() - 1), puntosdechoquede.get(puntosdechoquede.size() - 1));
-        PointF fin = recta.ChoqueRectas(new Recta(ini,new PointF(ini.x+izRecta.v.x,ini.y+izRecta.v.y)),true);
-
-        //Shader shader = new LinearGradient(ini.x,ini.y,fin.x,fin.y,)
-        //paint
-
-
-    }
-
-    //public Paint getPaint(){return paint;}
-
-    public void drawRayo(Canvas canvas){
-        canvas.drawPath(path,Luz.lPaint);
-        canvas.drawPath(halopath,Luz.hPaint);
-        //Esto es porque el metodo draw es llamado antes que el update por primera vez con lo que los path vacios no hay problema
-        //pero intentar dibujar un bitmap nulo crasea
-       //if(bmp!=null) canvas.drawBitmap(bmp, 50, 50,Luz.bPaint);
-    }
 
 
 }
+
+

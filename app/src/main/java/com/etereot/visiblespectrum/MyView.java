@@ -5,15 +5,22 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.LightingColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 
 import android.graphics.PointF;
-import android.graphics.drawable.Drawable;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
@@ -25,59 +32,54 @@ import java.lang.Object;
 import java.util.ArrayList;
 
 
-class MyView extends SurfaceView implements SurfaceHolder.Callback {
-    class MyThread extends Thread {
+class MyView extends GLSurfaceView {
+
+    private final MyGLRenderer mRenderer;
+
+
+    private Paint mPaint,cPaint,blurpaint,iluminePaint;
+
+    //coordenadas iniciales de la luz
+    private PointF iLuz;
+    private double iLuzx,iLuzy;
+
+    //Para dibujar los rayos y la iluminacion
+    private Bitmap bmp;
+    private Canvas ucanvas;
+
+    //Background
+    private Bitmap fracture;
+
+    public static int mCanvasHeight = 1;
+    public static int mCanvasWidth = 1;
+
+    //lista de objetos para calcular colisiones
+    //debe cambiarse por un arbol separado por cuadrantes, etc
+    public static ArrayList<Triangle> Objetos;
+
+    private final float TOUCH_SCALE_FACTOR = 180.0f / 400;
+    private float mPreviousX;
+    private float mPreviousY;
 
 
 
 
-        private Handler mHandler;
+    public MyView(Context context){
 
-        private SurfaceHolder mSurfaceHolder;
+        super(context);
 
-        /*
-         * State-tracking constants
-         */
+        // Create an OpenGL ES 2.0 context
+        setEGLContextClientVersion(2);
 
-        public static final int STATE_PAUSE = 1;
-        public static final int STATE_READY =2;
-        public static final int STATE_RUNNING = 3;
+        mRenderer = new MyGLRenderer();
 
+        // Set the Renderer for drawing on the GLSurfaceView
+        setRenderer(mRenderer);
 
-        private int mMode;
+        // Render the view only when there is a change in the drawing data
+        setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
 
-        private boolean mRun = false;
-
-        private final Object mRunLock = new Object();
-
-
-
-        private Paint mPaint,cPaint;
-
-
-        private Triangle mTriangle,rTriangle,kTriangle,oTriangle;
-
-
-        private Luz mLuz;
-
-
-
-        //coordenadas iniciales de la luz
-
-        private PointF iLuz;
-
-        private double iLuzx,iLuzy;
-
-
-        private float lastx,lasty;
-
-
-        //sensibilidad del control
-        private final float escala=0.1f;
-
-        //para ver si es necesario recalcular o no
-        private boolean change;
-
+    }
 
 
 
@@ -85,33 +87,19 @@ class MyView extends SurfaceView implements SurfaceHolder.Callback {
 
 
 
-
-        public MyThread(SurfaceHolder surfaceHolder, Context context,
-                        Handler handler) {
-
-            mSurfaceHolder = surfaceHolder;
-            mHandler = handler;
-            mContext = context;
-
-
+    private void a(){
             //Imagenes
-            Bitmap t,l;
+            Bitmap t;
             Resources r=getResources();
-            t = BitmapFactory.decodeResource(r,R.drawable.plano);
-            l = BitmapFactory.decodeResource(r,R.drawable.halo);
+            t = BitmapFactory.decodeResource(r, R.drawable.plano);
             t = getResizedBitmap(t, t.getHeight(), t.getWidth(), 180);
+
+            fracture = BitmapFactory.decodeResource(r, R.drawable.grietas);
+
+
 
 
             //Orden importante, en contra de las agujas del reloj
-            mTriangle = new Triangle(t);
-            rTriangle = new Triangle(t);
-            kTriangle = new Triangle(t);
-            oTriangle = new Triangle(t);
-
-
-            iLuz = new PointF();
-
-            mLuz = new Luz(l);
 
 
             mPaint = new Paint();
@@ -127,9 +115,12 @@ class MyView extends SurfaceView implements SurfaceHolder.Callback {
             cPaint.setStyle(Paint.Style.FILL_AND_STROKE);
             cPaint.setAntiAlias(true);
 
+            blurpaint = new Paint();
+            blurpaint.setAlpha(200);
+            blurpaint.setColorFilter(new ColorMatrixColorFilter(contrast(1.75f, -40)));
 
-
-
+            iluminePaint = new Paint();
+            iluminePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.LIGHTEN));
 
 
 
@@ -137,14 +128,9 @@ class MyView extends SurfaceView implements SurfaceHolder.Callback {
              * mas tarde debiera de ser un arbol que colocara cada objeto
              * segun el cuadrante que le toque
              */
-            Objetos = new ArrayList(4);
-            Objetos.add(mTriangle);
-            Objetos.add(rTriangle);
-            Objetos.add(kTriangle);
-            Objetos.add(oTriangle);
+            Objetos = new ArrayList(6);
+            //Objetos.add(mTriangle);
 
-
-            change=true;
 
 
 
@@ -154,332 +140,293 @@ class MyView extends SurfaceView implements SurfaceHolder.Callback {
 
 
 
-        public void doStart(){
-            synchronized (mSurfaceHolder) {
 
-                setState(STATE_RUNNING);
 
-            }
 
+
+
+
+
+
+    private void setGeometry(){
+
+        /*mTriangle.setTriangle(new PointF(50,50),true);
+        rTriangle.setTriangle(new PointF(350,50),true);
+        kTriangle.setTriangle(new PointF(200,100),true);
+        oTriangle.setTriangle(new PointF(50,200),true);
+        aTriangle.setTriangle(new PointF(350,400),true);
+        bTriangle.setTriangle(new PointF(70,350),true);
+        */
+
+        fracture = getResizedBitmap(fracture, mCanvasHeight,mCanvasWidth, 0);
+
+
+        //punto abajo centro, donde sale la luz
+        iLuzx = mCanvasWidth/2;
+        iLuzy = mCanvasHeight - 10;
+        iLuz.set((float) iLuzx, (float) iLuzy);
+
+        //mLuz.setLuz(iLuz);
+
+
+    }
+
+
+
+
+    public void doDraw(Canvas canvas){
+
+        //if(bmp==null){
+        bmp= Bitmap.createBitmap(getWidth(),getHeight(), Bitmap.Config.ARGB_8888);
+        ucanvas = new Canvas(bmp);
+        //}
+        //Clear the screen
+        canvas.drawColor(0xFF404050);
+
+        //Clear the canvas
+        ucanvas.drawColor(0xFF303030);
+        //Draw sources of light
+        //mLuz.drawLuz(ucanvas);
+        //downscale and blur the bitmap
+        bmp=downscale(bmp);
+
+        //draw blurred bitmap
+        canvas.drawBitmap(bmp, 0, 0, blurpaint);
+        //draw in the backgroud
+        canvas.drawBitmap(fracture, 0, 0,iluminePaint);
+
+        //draw every object
+        for (int i = 0; i < Objetos.size();i++){
+            //Objetos.get(i).drawTriangle(canvas, mPaint);
+        }
+        canvas.drawCircle(mCanvasWidth / 2, mCanvasHeight, 30, cPaint);
+
+
+        //draw rays
+        //mLuz.drawLuz(canvas);
+
+
+    }
+
+    private Bitmap downscale(Bitmap bmp){
+        bmp = Bitmap.createScaledBitmap(bmp,(int)(bmp.getWidth()*0.5),(int)(bmp.getHeight()*0.5),true);
+        //around 15 light looks good
+        fastblur(bmp, 15);
+        bmp = Bitmap.createScaledBitmap(bmp,(int)(bmp.getWidth()*2),(int)(bmp.getHeight()*2), true);
+        return bmp;
+    }
+
+    private ColorMatrix contrast(float contrast,float brightness){
+         ColorMatrix cm = new ColorMatrix(new float[]
+                 {
+                         contrast, 0, 0, 0, brightness,
+                         0, contrast, 0, 0, brightness,
+                         0, 0, contrast, 0, brightness,
+                         0, 0, 0, 1, 0
+                 }
+         );
+
+        return cm;
+    }
+
+    // Stack Blur Algorithm by Mario Klingemann <mario@quasimondo.com>
+    public void fastblur(Bitmap bitmap, int radius) {
+
+        //radius better should not be less than 1
+
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+
+        int[] pix = new int[w * h];
+
+        bitmap.getPixels(pix, 0, w, 0, 0, w, h);
+
+        int wm = w - 1;
+        int hm = h - 1;
+        int wh = w * h;
+        int div = radius + radius + 1;
+
+        int r[] = new int[wh];
+        int g[] = new int[wh];
+        int b[] = new int[wh];
+        int rsum, gsum, bsum, x, y, i, p, yp, yi, yw;
+        int vmin[] = new int[Math.max(w, h)];
+
+        int divsum = (div + 1) >> 1;
+        divsum *= divsum;
+        int dv[] = new int[256 * divsum];
+        for (i = 0; i < 256 * divsum; i++) {
+            dv[i] = (i / divsum);
         }
 
-        public void pause() {
-            synchronized (mSurfaceHolder) {
-                if (mMode == STATE_RUNNING) setState(STATE_PAUSE);
-            }
-        }
+        yw = yi = 0;
 
-        /**
-         * Restores game state from the indicated Bundle. Typically called when
-         * the Activity is being restored after having been previously
-         * destroyed.
-         *
-         * @param savedState Bundle containing the game state
-         */
-        public synchronized void restoreState(Bundle savedState) {
+        int[][] stack = new int[div][3];
+        int stackpointer;
+        int stackstart;
+        int[] sir;
+        int rbs;
+        int r1 = radius + 1;
+        int routsum, goutsum, boutsum;
+        int rinsum, ginsum, binsum;
 
-
-        }
-
-        public Bundle saveState(Bundle map){
-            synchronized (mSurfaceHolder) {
-
-            }
-
-            return map;
-
-        }
-
-        @Override
-        public void run() {
-
-            /*para instaurar por primera vez la geometria antes
-            de que se llame a onDraw, sino se generaria un error
-             */
-            this.setGeometry();
-
-            while (mRun) {
-                Canvas c = null;
-                try {
-                    c = mSurfaceHolder.lockCanvas(null);
-                    synchronized (mSurfaceHolder) {
-                        if (mMode == STATE_RUNNING) updatePhysics();
-                        //  Do not allow mRun to be set false until
-                        // we are sure all canvas draw operations are complete.
-                        //
-                        // If mRun has been toggled false, inhibit canvas operations.
-                        synchronized (mRunLock) {
-                            if (mRun) doDraw(c);
-                        }
-                    }
-                } finally {
-                    // do this in a finally so that if an exception is thrown
-                    // during the above, we don't leave the Surface in an
-                    // inconsistent state
-                    if (c != null) {
-                        mSurfaceHolder.unlockCanvasAndPost(c);
-                    }
-                }
-            }
-        }
-
-        private void setGeometry(){
-
-            mTriangle.setTriangle(new PointF(50,50),true);
-            rTriangle.setTriangle(new PointF(350,50),true);
-            kTriangle.setTriangle(new PointF(200,100),true);
-            oTriangle.setTriangle(new PointF(50,200),true);
-
-
-            //punto abajo centro, donde sale la luz
-            iLuzx = mCanvasWidth/2;
-            iLuzy = mCanvasHeight - 10;
-            iLuz.set((float)iLuzx,(float)iLuzy);
-
-            mLuz.setLuz(iLuz);
-
-
-        }
-
-
-
-        private void setDirection(double grado){
-            mLuz.setDirection(grado);
-            change=true;
-        }
-
-
-
-        /**
-         * Sets the game mode.
-         */
-        public void setState(int mode) {
-            synchronized (mSurfaceHolder) {
-                setState(mode, null);
-            }
-        }
-
-        public void setState(int mode, CharSequence message) {
-            /*
-             *  We cant touch the view, so
-             * Instead we use a Message + Handler to relay commands to the main
-             * thread, which updates the user-text View.
-             */
-            synchronized (mSurfaceHolder) {
-                mMode = mode;
-
-                if (mMode == STATE_RUNNING) {
-                    Message msg = mHandler.obtainMessage();
-                    Bundle b = new Bundle();
-                    b.putString("text", "");
-                    b.putInt("viz", View.INVISIBLE);
-                    msg.setData(b);
-                    mHandler.sendMessage(msg);
+        for (y = 0; y < h; y++) {
+            rinsum = ginsum = binsum = routsum = goutsum = boutsum = rsum = gsum = bsum = 0;
+            for (i = -radius; i <= radius; i++) {
+                p = pix[yi + Math.min(wm, Math.max(i, 0))];
+                sir = stack[i + radius];
+                sir[0] = (p & 0xff0000) >> 16;
+                sir[1] = (p & 0x00ff00) >> 8;
+                sir[2] = (p & 0x0000ff);
+                rbs = r1 - Math.abs(i);
+                rsum += sir[0] * rbs;
+                gsum += sir[1] * rbs;
+                bsum += sir[2] * rbs;
+                if (i > 0) {
+                    rinsum += sir[0];
+                    ginsum += sir[1];
+                    binsum += sir[2];
                 } else {
-
-
-                    Resources res = mContext.getResources();
-                    CharSequence str = "";
-                    if (mMode == STATE_READY)
-                        str = res.getText(R.string.mode_ready);
-                    else if (mMode == STATE_PAUSE)
-                        str = res.getText(R.string.mode_pause);
-                    if (message != null) {
-                        str = message + "\n" + str;
-                    }
-
-
-
-                    Message msg = mHandler.obtainMessage();
-                    Bundle b = new Bundle();
-                    b.putString("text", str.toString());
-                    b.putInt("viz", View.VISIBLE);
-                    msg.setData(b);
-                    mHandler.sendMessage(msg);
+                    routsum += sir[0];
+                    goutsum += sir[1];
+                    boutsum += sir[2];
                 }
             }
+            stackpointer = radius;
+
+            for (x = 0; x < w; x++) {
+
+                r[yi] = dv[rsum];
+                g[yi] = dv[gsum];
+                b[yi] = dv[bsum];
+
+                rsum -= routsum;
+                gsum -= goutsum;
+                bsum -= boutsum;
+
+                stackstart = stackpointer - radius + div;
+                sir = stack[stackstart % div];
+
+                routsum -= sir[0];
+                goutsum -= sir[1];
+                boutsum -= sir[2];
+
+                if (y == 0) {
+                    vmin[x] = Math.min(x + radius + 1, wm);
+                }
+                p = pix[yw + vmin[x]];
+
+                sir[0] = (p & 0xff0000) >> 16;
+                sir[1] = (p & 0x00ff00) >> 8;
+                sir[2] = (p & 0x0000ff);
+
+                rinsum += sir[0];
+                ginsum += sir[1];
+                binsum += sir[2];
+
+                rsum += rinsum;
+                gsum += ginsum;
+                bsum += binsum;
+
+                stackpointer = (stackpointer + 1) % div;
+                sir = stack[(stackpointer) % div];
+
+                routsum += sir[0];
+                goutsum += sir[1];
+                boutsum += sir[2];
+
+                rinsum -= sir[0];
+                ginsum -= sir[1];
+                binsum -= sir[2];
+
+                yi++;
+            }
+            yw += w;
         }
+        for (x = 0; x < w; x++) {
+            rinsum = ginsum = binsum = routsum = goutsum = boutsum = rsum = gsum = bsum = 0;
+            yp = -radius * w;
+            for (i = -radius; i <= radius; i++) {
+                yi = Math.max(0, yp) + x;
 
+                sir = stack[i + radius];
 
+                sir[0] = r[yi];
+                sir[1] = g[yi];
+                sir[2] = b[yi];
 
-        public void setRunning(boolean b) {
-            // Do not allow mRun to be modified while any canvas operations
-            // are potentially in-flight..
-            synchronized (mRunLock) {
-                mRun = b;
+                rbs = r1 - Math.abs(i);
+
+                rsum += r[yi] * rbs;
+                gsum += g[yi] * rbs;
+                bsum += b[yi] * rbs;
+
+                if (i > 0) {
+                    rinsum += sir[0];
+                    ginsum += sir[1];
+                    binsum += sir[2];
+                } else {
+                    routsum += sir[0];
+                    goutsum += sir[1];
+                    boutsum += sir[2];
+                }
+
+                if (i < hm) {
+                    yp += w;
+                }
+            }
+            yi = x;
+            stackpointer = radius;
+            for (y = 0; y < h; y++) {
+                // Preserve alpha channel: ( 0xff000000 & pix[yi] )
+                pix[yi] = ( 0xff000000 & pix[yi] ) | ( dv[rsum] << 16 ) | ( dv[gsum] << 8 ) | dv[bsum];
+
+                rsum -= routsum;
+                gsum -= goutsum;
+                bsum -= boutsum;
+
+                stackstart = stackpointer - radius + div;
+                sir = stack[stackstart % div];
+
+                routsum -= sir[0];
+                goutsum -= sir[1];
+                boutsum -= sir[2];
+
+                if (x == 0) {
+                    vmin[y] = Math.min(y + r1, hm) * w;
+                }
+                p = x + vmin[y];
+
+                sir[0] = r[p];
+                sir[1] = g[p];
+                sir[2] = b[p];
+
+                rinsum += sir[0];
+                ginsum += sir[1];
+                binsum += sir[2];
+
+                rsum += rinsum;
+                gsum += ginsum;
+                bsum += binsum;
+
+                stackpointer = (stackpointer + 1) % div;
+                sir = stack[stackpointer];
+
+                routsum += sir[0];
+                goutsum += sir[1];
+                boutsum += sir[2];
+
+                rinsum -= sir[0];
+                ginsum -= sir[1];
+                binsum -= sir[2];
+
+                yi += w;
             }
         }
 
-        /* Callback invoked when the surface dimensions change. */
-        public void setSurfaceSize(int width, int height) {
-            // synchronized to make sure these all change atomically
-            synchronized (mSurfaceHolder) {
-                mCanvasWidth = width;
-                mCanvasHeight = height;
-
-
-
-            }
-        }
-
-
-
-        public void unpause(){
-
-        }
-
-
-        public void doDraw(Canvas canvas){
-
-
-            canvas.drawColor(0xFF404050);
-
-            for(int i=0;i<Objetos.size();i++){
-                Objetos.get(i).drawTriangle(canvas, mPaint);
-            }
-
-            mLuz.drawLuz(canvas);
-            canvas.drawCircle(mCanvasWidth / 2, mCanvasHeight, 30, cPaint);
-
-        }
-
-        public void updatePhysics(){
-
-            if(change) mLuz.updateLuz();
-            change = false;
-
-        }
-
-
-        public boolean onTouchEvent(MotionEvent e) {
-
-            float x=e.getX();
-            float y=e.getY();
-
-            float dx=-(x-lastx);
-            float dy=y-lasty;
-
-            // reverse direction of rotation to left of the mid-line
-            //if (x > mCanvasWidth / 2) {
-            //    dy = dy * -1 ;
-            //}
-
-            //setDirection((dx+dy)*escala);
-
-            //sencillo para pruebas
-            if(x>mCanvasWidth/2) setDirection(-0.2);
-            else setDirection(0.2);
-
-            lastx = x;
-            lasty = y;
-            return true;
-        }
+        bitmap.setPixels(pix, 0, w, 0, 0, w, h);
     }
 
-    public static int mCanvasHeight = 1;
-
-    public static int mCanvasWidth = 1;
-
-    //lista de objetos para calcular colisiones
-    //debe cambiarse por un arbol separado por cuadrantes, etc
-    public static ArrayList<Triangle> Objetos;
-    public static TreeNode<Triangle> objetos;
-
-
-    private Context mContext;
-
-    /** Pointer to the text view to display "Paused.." etc. */
-    private TextView mStatusText;
-
-    /** The thread that actually draws the animation */
-    private MyThread thread;
-
-    public MyView(Context context, AttributeSet attrs){
-
-        super(context,attrs);
-
-        SurfaceHolder holder = getHolder();
-        holder.addCallback(this);
-
-        // create thread only; it's started in surfaceCreated()
-        thread = new MyThread(holder, context, new Handler() {
-            @Override
-            public void handleMessage(Message m) {
-                //Aunque lo parezca no es un error
-                mStatusText.setVisibility(m.getData().getInt("viz"));
-                mStatusText.setText(m.getData().getString("text"));
-            }
-        });
-
-        setFocusable(true);
-
-    }
-
-    public MyThread getThread() {
-        return thread;
-    }
-
-
-    /**
-     * Standard override to get key-press events.
-     */
-    @Override
-    public boolean onTouchEvent(MotionEvent e) {
-        return thread.onTouchEvent(e);
-    }
-
-
-    /**
-     * Standard window-focus override. Notice focus lost so we can pause on
-     * focus lost. e.g. user switches to take a call.
-     */
-    @Override
-    public void onWindowFocusChanged(boolean hasWindowFocus) {
-        if (!hasWindowFocus) thread.pause();
-    }
-
-    /**
-     * Installs a pointer to the text view used for messages.
-     */
-    public void setTextView(TextView textView) {
-        mStatusText = textView;
-    }
-
-    /* Callback invoked when the surface dimensions change. */
-    public void surfaceChanged(SurfaceHolder holder, int format, int width,
-                               int height) {
-        thread.setSurfaceSize(width, height);
-    }
-
-    /*
-     * Callback invoked when the Surface has been created and is ready to be
-     * used.
-     */
-    public void surfaceCreated(SurfaceHolder holder) {
-        // start the thread here so that we don't busy-wait in run()
-        // waiting for the surface to be created
-        thread.setRunning(true);
-        thread.start();
-    }
-
-    /*
-     * Callback invoked when the Surface has been destroyed and must no longer
-     * be touched. WARNING: after this method returns, the Surface/Canvas must
-     * never be touched again!
-     */
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        // we have to tell thread to shut down & wait for it to finish, or else
-        // it might touch the Surface after we return and explode
-        boolean retry = true;
-        thread.setRunning(false);
-        while (retry) {
-            try {
-                thread.join();
-                retry = false;
-            } catch (InterruptedException e) {
-            }
-        }
-    }
 
     public Bitmap getResizedBitmap(Bitmap bm, int newHeight, int newWidth, int angle) {
 
@@ -504,29 +451,41 @@ class MyView extends SurfaceView implements SurfaceHolder.Callback {
 
     }
 
+    @Override
+    public boolean onTouchEvent(MotionEvent e) {
+        // MotionEvent reports input details from the touch screen
+        // and other input controls. In this case, you are only
+        // interested in events where the touch position changed.
 
+        float x = e.getX();
+        float y = e.getY();
 
+        switch (e.getAction()) {
+            case MotionEvent.ACTION_MOVE:
 
-    //public void orden(ArrayList<Triangle> objetos){
+                float dx = x - mPreviousX;
+                float dy = y - mPreviousY;
 
-    //    this.objetos = new TreeNode<Triangle>(objetos.get(0));
+                // reverse direction of rotation above the mid-line
+                if (y > getHeight() / 2) {
+                    dx = dx * -1 ;
+                }
 
+                // reverse direction of rotation to left of the mid-line
+                if (x < getWidth() / 2) {
+                    dy = dy * -1 ;
+                }
 
-    //    for(int i=1;i<objetos.size();i++){
-    //        busca(objetos.get(i));
-    //    }
+                mRenderer.setAngle(
+                        mRenderer.getAngle() +
+                                ((dx + dy) * TOUCH_SCALE_FACTOR));
+                requestRender();
+        }
 
-
-
-    //}
-
-    //private void busca(Triangle objeto){
-
-    //    if(objetos.)
-
-    //}
-
-
+        mPreviousX = x;
+        mPreviousY = y;
+        return true;
+    }
 
 
 
