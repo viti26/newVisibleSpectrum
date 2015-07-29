@@ -1,4 +1,4 @@
-package com.etereot.visiblespectrum;
+package com.etereot.visiblespectrum.main;
 
 import javax.microedition.khronos.egl.EGLConfig;
 
@@ -6,6 +6,7 @@ import android.graphics.PointF;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 
+import com.etereot.visiblespectrum.geometry.Triangle;
 
 import java.util.ArrayList;
 

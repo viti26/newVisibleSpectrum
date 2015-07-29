@@ -1,12 +1,11 @@
-package com.etereot.visiblespectrum;
+package com.etereot.visiblespectrum.geometry;
 
 import android.graphics.PointF;
-import android.opengl.GLES20;
+import android.util.Log;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-import java.nio.ShortBuffer;
+import com.etereot.visiblespectrum.util.DebugConfig;
+import com.etereot.visiblespectrum.util.Mates;
+
 import java.util.ArrayList;
 
 /**
@@ -17,11 +16,13 @@ import java.util.ArrayList;
  */
 public class Rayo {
 
+    public static String TAG = "Ray";
+
     private Recta izRecta;
     private Recta deRecta;
 
-    private ArrayList<PointF> puntosdechoqueiz;
-    private ArrayList<PointF> puntosdechoquede;
+    private ArrayList<PointF> left_collision_vertex;
+    private ArrayList<PointF> right_collision_vertex;
 
     //mitad grosor luz
     private float tluz;
@@ -29,23 +30,29 @@ public class Rayo {
     private float rayCoords[];
     private short drawOrder[];
 
-    Rayo() {
+    public Rayo() {
 
-        puntosdechoquede = new ArrayList<PointF>(10);
-        puntosdechoqueiz = new ArrayList<PointF>(10);
+        right_collision_vertex = new ArrayList<PointF>(10);
+        left_collision_vertex = new ArrayList<PointF>(10);
 
         izRecta = new Recta();
         deRecta = new Recta();
 
     }
 
-    Rayo(PointF iniz, PointF inid, PointF vertex) {
+    public Rayo(PointF iniz, PointF inid, PointF vertex) {
 
-        puntosdechoquede = new ArrayList<PointF>(10);
-        puntosdechoqueiz = new ArrayList<PointF>(10);
+        if(DebugConfig.ON){
+            if(iniz==null) Log.e(TAG,"Constructor-iniz is null");
+            if(inid==null) Log.e(TAG,"Constructor-inid is null");
+            if(vertex==null) Log.e(TAG,"Constructor-vertex is null");
+        }
 
-        puntosdechoqueiz.add(iniz);
-        puntosdechoquede.add(inid);
+        right_collision_vertex = new ArrayList<PointF>(10);
+        left_collision_vertex = new ArrayList<PointF>(10);
+
+        left_collision_vertex.add(iniz);
+        right_collision_vertex.add(inid);
 
         izRecta = new Recta();
         deRecta = new Recta();
@@ -60,11 +67,11 @@ public class Rayo {
 
 
     public void addPuntosdechoqueiz(PointF p) {
-        puntosdechoqueiz.add(p);
+        left_collision_vertex.add(p);
     }
 
     public void addPuntosdechoquede(PointF p) {
-        puntosdechoquede.add(p);
+        right_collision_vertex.add(p);
     }
 
     public void setIzRecta(PointF p, PointF v) {
@@ -80,11 +87,11 @@ public class Rayo {
     }
 
     public PointF izChoqueBordes() {
-        return izRecta.ChoqueBordes();
+        return Mates.edgeCollision(izRecta);
     }
 
     public PointF deChoqueBordes() {
-        return deRecta.ChoqueBordes();
+        return Mates.edgeCollision(deRecta);
     }
 
     public Recta getIzRecta() {
@@ -99,12 +106,12 @@ public class Rayo {
         return tluz;
     }
 
-    public ArrayList<PointF> getPuntosdechoqueiz() {
-        return puntosdechoqueiz;
+    public ArrayList<PointF> getLeft_collision_vertex() {
+        return left_collision_vertex;
     }
 
-    public ArrayList<PointF> getPuntosdechoquede() {
-        return puntosdechoquede;
+    public ArrayList<PointF> getRight_collision_vertex() {
+        return right_collision_vertex;
     }
 
     //Cool for every ray except for the first one, it is nor deleted so
@@ -112,20 +119,20 @@ public class Rayo {
     //because before you do not knot their size
     public void setCoords(){
 
-        int size_iz = puntosdechoqueiz.size();
-        int size_de = puntosdechoquede.size();
+        int size_iz = left_collision_vertex.size();
+        int size_de = right_collision_vertex.size();
         int sum_size = size_de + size_iz;
 
         rayCoords= new float[sum_size*2];
 
         //this sets the coordinates of the ray
         for(int i=0;i<size_de;i++){
-            rayCoords[i*2]=puntosdechoquede.get(i).x;
-            rayCoords[(i*2)+1]=puntosdechoquede.get(i).y;
+            rayCoords[i*2]= right_collision_vertex.get(i).x;
+            rayCoords[(i*2)+1]= right_collision_vertex.get(i).y;
         }
         for(int j=0;j<size_iz;j++){
-            rayCoords[(j+size_de)*2]=puntosdechoqueiz.get(size_iz-j-1).x;
-            rayCoords[(j+size_de)*2+1]=puntosdechoqueiz.get(size_iz-j-1).y;
+            rayCoords[(j+size_de)*2]= left_collision_vertex.get(size_iz-j-1).x;
+            rayCoords[(j+size_de)*2+1]= left_collision_vertex.get(size_iz-j-1).y;
         }
 
         //this sets the drawing order, its easier this way
@@ -140,10 +147,10 @@ public class Rayo {
     //vacia puntos de la geometria y pon denuevo el inicio
     public void clearchoque() {
 
-        puntosdechoqueiz.clear();
-        puntosdechoquede.clear();
-        puntosdechoqueiz.add(izRecta.getP1());
-        puntosdechoquede.add(deRecta.getP1());
+        left_collision_vertex.clear();
+        right_collision_vertex.clear();
+        left_collision_vertex.add(izRecta.getP1());
+        right_collision_vertex.add(deRecta.getP1());
 
     }
 

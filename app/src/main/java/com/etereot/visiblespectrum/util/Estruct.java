@@ -1,7 +1,6 @@
-package com.etereot.visiblespectrum;
+package com.etereot.visiblespectrum.util;
 
-import java.util.Collections;
-import java.util.Comparator;
+import com.etereot.visiblespectrum.geometry.Triangle;
 
 /**
  * Created by victor on 8/06/15.
@@ -11,7 +10,7 @@ public class Estruct implements Comparable<Estruct>{
     public Triangle objeto;
     public double dist;
 
-    Estruct(Triangle objeto,double dist){
+    public Estruct(Triangle objeto,double dist){
 
         this.objeto = objeto;
         this.dist = dist;
